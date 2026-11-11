@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Treino</title>
+<meta name="robots" content="noindex">
+<style>
+:root { --bg: #000; --ink: #f2f4f7; --ink-2: #9aa4b5; --accent: #4f8ff7; --good: #34c27a; --bad: #f05a4f; --line: #262b34; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+  font: 600 4.6vmin/1.25 system-ui, -apple-system, Roboto, sans-serif; overflow: hidden; }
+/* o Mini Web Browser mostra a página num retângulo (~440×451) no meio do círculo: usa o retângulo todo.
+   Tamanhos pela altura (vh), que é o que limita; a faixa do Google, se aberta, só encolhe tudo junto. */
+.tela { height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.5vh; padding: 2vh 3vw; text-align: center; }
+.rot { font-size: 5.4vh; color: var(--accent); text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; max-width: 96vw; overflow: hidden; text-overflow: ellipsis; }
+.rot.troca { color: var(--good); }
+.nome { font-size: 7vh; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 96vw; }
+.anel { position: relative; width: 54vh; height: 54vh; display: grid; place-items: center; }
+.anel svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+.anel circle { fill: none; stroke-width: 7.5; }
+.anel .fundo { stroke: var(--line); }
+.anel .arco { stroke: var(--good); stroke-linecap: round; }
+.anel.over .arco { stroke: var(--bad); }
+.anel.serie .arco { stroke: var(--accent); }
+.anel.vazio .arco { opacity: 0; }
+.t { font-size: 20vh; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.alvo { position: absolute; bottom: 10vh; font-size: 5vh; color: var(--ink-2); }
+.rodape { position: absolute; top: 10vh; font-size: 4.6vh; color: var(--ink-2); display: flex; align-items: center; gap: 1.2vh; }
+.btn { border: 0; border-radius: 6vh; background: var(--accent); color: #fff; font: inherit; font-size: 8.5vh;
+  width: 94vw; height: 19vh; padding: 0; min-height: 48px; }
+.btn:active { filter: brightness(.85); }
+.btn.verde { background: var(--good); color: #04150c; }
+.btn[hidden] { display: block; visibility: hidden; } /* guarda o espaço: o anel não pula quando o botão some */
+/* tela cheia ("Start in FullScreen Mode"): a página ocupa o círculo todo; tudo fica dentro do círculo,
+   mais estreito em cima e embaixo, onde a borda redonda corta. */
+.redondo .tela { gap: 1vmin; padding: 0; }
+.redondo .rot { font-size: 5vmin; max-width: 62vmin; }
+.redondo .nome { font-size: 6.2vmin; max-width: 76vmin; }
+.redondo .anel { width: 50vmin; height: 50vmin; }
+.redondo .t { font-size: 15vmin; }
+.redondo .alvo { bottom: 9vmin; font-size: 4.4vmin; }
+.redondo .rodape { top: 9vmin; font-size: 4.2vmin; }
+.redondo .ponto { width: 2.2vmin; height: 2.2vmin; }
+.redondo .btn { width: 58vmin; height: 13vmin; border-radius: 99px; font-size: 6.6vmin; }
+.ponto { width: 2.4vh; height: 2.4vh; border-radius: 50%; background: var(--line); }
+.ponto.ok { background: var(--good); } .ponto.erro { background: var(--bad); }
+.msg { font-size: 5vmin; color: var(--ink-2); padding: 0 4vmin; }
+.flash { animation: flash 1.2s ease-out 2; }
+@keyframes flash { 0%, 100% { background: var(--bg); } 30% { background: #3a1210; } }
+</style>
+</head>
+<body>
+<div class="tela" id="tela">
+  <div class="rot" id="rot">Conectando…</div>
+  <div class="nome" id="nome"></div>
+  <div class="anel" id="anel">
+    <svg viewBox="0 0 100 100" aria-hidden="true"><circle class="fundo" cx="50" cy="50" r="44"/><circle class="arco" id="arco" cx="50" cy="50" r="44"/></svg>
+    <div class="rodape"><span class="ponto" id="ponto"></span><span id="info"></span></div>
+    <div class="t" id="t">–:––</div>
+    <div class="alvo" id="alvo"></div>
+  </div>
+  <button class="btn" id="acao" hidden></button>
+</div>
+<script>
+const CHAVE_SERVIDOR = '';
+// Fora do Apps Script (GitHub Pages) a chave vem do endereço salvo: ...github.io/treino-relogio/#CHAVE
+// (o que vem depois do # não sai do relógio) e fica guardada aqui para as próximas vezes.
+const API = 'https://script.google.com/macros/s/AKfycbwmfrUswieUGZP-ms-GY7u1oTwAvmtoFSEHvQfT8Xul1__msj6ptuOFDD2UbsliVQPI/exec';
+const CHAVE = CHAVE_SERVIDOR || (() => {
+  const h = decodeURIComponent(location.hash.slice(1));
+  try { if (h) localStorage.setItem('chave-relogio', h); return h || localStorage.getItem('chave-relogio') || ''; } catch (e) { return h; }
+})();
+const C = 2 * Math.PI * 44;
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, '0');
+const fmt = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ':' + pad(s % 60); };
+let srv = null;          // estado gravado pelo celular
+let pend = null;         // toque feito aqui e ainda não aplicado pelo celular: { estado, em, ate }
+let buscando = false, ultOk = 0, erro = false, bipou = null, audio = null;
+$('arco').setAttribute('stroke-dasharray', C);
+
+function rodar(fn, ...args) {
+  if (window.google && google.script && google.script.run) // dentro do Apps Script
+    return new Promise((ok, falha) => google.script.run.withSuccessHandler(ok).withFailureHandler(falha)[fn](...args));
+  const p = new URLSearchParams({ api: fn, k: args[0] }); // fora dele: chama a ponte pela internet
+  if (fn === 'comando') Object.entries(args[1]).forEach(([k, v]) => p.set(k, v));
+  return fetch(API + '?' + p, { cache: 'no-store' }).then(r => r.json())
+    .then(j => { if (j && j.erro) throw new Error(j.erro); return fn === 'comando' ? j.id : j; });
+}
+async function buscar() {
+  if (buscando) return;
+  buscando = true;
+  try { const r = await rodar('estado', CHAVE); srv = r.estado || {}; ultOk = Date.now(); erro = false; }
+  catch (e) { erro = true; }
+  finally { buscando = false; desenhar(); }
+}
+/** O que mostrar: o toque feito aqui vale até o celular confirmar (ou 20 s). */
+function atual() {
+  if (pend && Date.now() < pend.ate && (!srv || !(srv.ts > pend.em))) return pend.estado;
+  pend = null;
+  return srv;
+}
+function ligarSom() {
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.resume) audio.resume(); } catch (e) {}
+}
+function bipe() {
+  try {
+    if (navigator.vibrate) navigator.vibrate([400, 150, 400]);
+    if (!audio) return;
+    [0, .25, .5].forEach(d => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = 880; o.connect(g); g.connect(audio.destination);
+      g.gain.setValueAtTime(.35, audio.currentTime + d); g.gain.exponentialRampToValueAtTime(.001, audio.currentTime + d + .18);
+      o.start(audio.currentTime + d); o.stop(audio.currentTime + d + .2);
+    });
+  } catch (e) {}
+}
+async function tocar() {
+  ligarSom();
+  const e = atual();
+  if (!e || !e.modo || ['nenhum', 'fim'].includes(e.modo) || e.pausado) return;
+  const em = Date.now();
+  let cmd, novo;
+  if (e.modo === 'exec') {
+    const ultima = e.total && e.serie >= e.total;
+    cmd = { acao: 'terminei', ex: e.ex, nome: e.nome, serie: e.serie, em };
+    novo = ultima
+      ? { ...e, modo: e.proxNome ? 'desc' : 'fim', troca: true, desde: em, nome: e.proxNome, serie: 0, total: e.proxTotal, alvo: e.proxAlvo, ex: -1, feitos: e.feitos + 1 }
+      : { ...e, modo: 'desc', troca: false, desde: em };
+  } else {
+    cmd = { acao: 'comecar', ex: e.ex, nome: e.nome, serie: e.serie + 1, em };
+    novo = { ...e, modo: 'exec', desde: em, serie: e.serie + 1 };
+  }
+  pend = { estado: novo, em, ate: em + 20000 };
+  desenhar();
+  try { await rodar('comando', CHAVE, cmd); } catch (err) { pend = null; erro = true; desenhar(); }
+}
+function desenhar() {
+  const e = atual(), agora = Date.now();
+  const anel = $('anel'), arco = $('arco'), btn = $('acao');
+  const velho = !e || !e.ts || agora - e.ts > 4 * 3600e3;
+  $('ponto').className = 'ponto ' + (erro ? 'erro' : ultOk ? 'ok' : '');
+  let rot = '', nome = '', t = '–:––', alvo = '', cls = 'anel', off = C, txtBtn = '', verde = false, rotCls = 'rot';
+  if (!CHAVE) {
+    rot = 'Sem chave'; nome = 'Abra pelo endereço com #chave'; t = '—'; cls += ' vazio';
+  } else if (!e || velho || e.modo === 'nenhum') {
+    rot = ultOk || erro ? 'Sem treino' : 'Conectando…';
+    nome = ultOk || erro ? 'Abra o treino no celular' : '';
+    t = '—'; cls += ' vazio';
+  } else if (e.modo === 'fim') {
+    rot = 'Tudo feito'; nome = 'Conclua no celular'; t = '✓'; cls += ' vazio';
+  } else {
+    nome = e.nome || '';
+    const de = e.total ? ' de ' + e.total : '';
+    if (e.modo === 'exec') {
+      rot = 'Série ' + e.serie + de; cls += ' serie'; off = 0; t = fmt(agora - e.desde);
+      txtBtn = '✓ Terminei';
+    } else if (e.modo === 'desc') {
+      const dt = agora - e.desde;
+      rot = e.troca ? 'Próximo' : 'Descanso · ' + e.serie + 'ª feita'; rotCls += e.troca ? ' troca' : '';
+      t = fmt(dt);
+      if (e.alvo) {
+        alvo = 'ficha ' + fmt(e.alvo * 1000);
+        off = C * (1 - Math.min(1, dt / (e.alvo * 1000)));
+        if (dt > e.alvo * 1000) cls += ' over';
+        if (dt >= e.alvo * 1000 && bipou !== e.desde && dt < e.alvo * 1000 + 15000) {
+          bipou = e.desde; bipe();
+          const tl = $('tela'); tl.classList.remove('flash'); void tl.offsetWidth; tl.classList.add('flash');
+        }
+      } else off = 0;
+      txtBtn = '▶ ' + (e.serie + 1) + 'ª série'; verde = true;
+    } else {
+      rot = 'Primeiro'; t = '0:00'; txtBtn = '▶ 1ª série'; verde = true; cls += ' vazio';
+    }
+    if (e.pausado) { rot = 'Pausado no celular'; txtBtn = ''; }
+  }
+  $('rot').textContent = rot; $('rot').className = rotCls;
+  $('nome').textContent = nome;
+  $('t').textContent = t; $('alvo').textContent = alvo;
+  anel.className = cls; arco.setAttribute('stroke-dashoffset', off.toFixed(1));
+  btn.hidden = !txtBtn; btn.textContent = txtBtn; btn.className = 'btn' + (verde ? ' verde' : '');
+  $('info').textContent = e && !velho && e.nItens ? e.feitos + '/' + e.nItens + ' feitos' : '';
+}
+/** Em tela cheia a página ocupa a tela redonda; fora dela, o navegador mostra um retângulo no meio.
+ *  Com a faixa do Google aberta no topo (o X fica fora da tela), a parte livre ainda contém um círculo
+ *  menor, da altura desta página e centrado nela: o layout redondo usa vmin = essa altura e cabe ali. */
+function forma() {
+  const cheia = innerWidth >= screen.width - 8;
+  document.documentElement.classList.toggle('redondo', cheia);
+}
+addEventListener('resize', forma);
+forma();
+$('acao').addEventListener('click', tocar);
+document.addEventListener('click', ligarSom);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') buscar(); });
+setInterval(desenhar, 250);
+setInterval(buscar, 3000);
+buscar();
+</script>
+</body>
+</html>
