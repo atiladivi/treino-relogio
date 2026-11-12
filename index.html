@@ -45,7 +45,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
 .redondo .ponto { width: 2.2vmin; height: 2.2vmin; }
 .redondo .btn { width: 58vmin; height: 13vmin; border-radius: 99px; font-size: 6.6vmin; }
 .ponto { width: 2.4vh; height: 2.4vh; border-radius: 50%; background: var(--line); }
-.ponto.ok { background: var(--good); } .ponto.erro { background: var(--bad); }
+.ponto.ok { background: var(--good); } .ponto.erro { background: var(--bad); } .ponto.espera { background: #f2c14e; }
 .msg { font-size: 5vmin; color: var(--ink-2); padding: 0 4vmin; }
 .flash { animation: flash 1.2s ease-out 2; }
 @keyframes flash { 0%, 100% { background: var(--bg); } 30% { background: #3a1210; } }
@@ -77,29 +77,56 @@ const $ = id => document.getElementById(id);
 const pad = n => String(n).padStart(2, '0');
 const fmt = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ':' + pad(s % 60); };
 let srv = null;          // estado gravado pelo celular
-let pend = null;         // toque feito aqui e ainda não aplicado pelo celular: { estado, em, ate }
-let buscando = false, ultOk = 0, erro = false, bipou = null, audio = null;
+let pend = null;         // toque feito aqui e ainda não aplicado pelo celular: { estado, em, id }
+let fila = [];           // toques ainda não entregues à ponte (rede caiu): reenviados na próxima consulta
+let parado = false;      // o celular parou de ler os toques (tela apagada / app em segundo plano)
+let buscando = false, enviando = false, ultOk = 0, erro = false, bipou = null, audio = null;
 $('arco').setAttribute('stroke-dasharray', C);
 
+/** Chama a ponte; desiste em 10 s (com a rede ruim da academia, um pedido podia ficar pendurado e travar tudo). */
 function rodar(fn, ...args) {
+  const limite = new Promise((_, falha) => setTimeout(() => falha(new Error('sem resposta')), 10000));
   if (window.google && google.script && google.script.run) // dentro do Apps Script
-    return new Promise((ok, falha) => google.script.run.withSuccessHandler(ok).withFailureHandler(falha)[fn](...args));
+    return Promise.race([limite, new Promise((ok, falha) => google.script.run.withSuccessHandler(ok).withFailureHandler(falha)[fn](...args))]);
   const p = new URLSearchParams({ api: fn, k: args[0] }); // fora dele: chama a ponte pela internet
   if (fn === 'comando') Object.entries(args[1]).forEach(([k, v]) => p.set(k, v));
-  return fetch(API + '?' + p, { cache: 'no-store' }).then(r => r.json())
-    .then(j => { if (j && j.erro) throw new Error(j.erro); return fn === 'comando' ? j.id : j; });
+  const ac = window.AbortController ? new AbortController() : null;
+  if (ac) setTimeout(() => ac.abort(), 10000);
+  return Promise.race([limite, fetch(API + '?' + p, { cache: 'no-store', signal: ac ? ac.signal : undefined }).then(r => r.json())
+    .then(j => { if (j && j.erro) throw new Error(j.erro); return fn === 'comando' ? j.id : j; })]);
+}
+/** Entrega os toques guardados, na ordem; se a rede falhar, ficam para a próxima. */
+async function enviarFila() {
+  if (enviando) return;
+  enviando = true;
+  try {
+    while (fila.length) {
+      const id = await rodar('comando', CHAVE, fila[0]);
+      fila.shift();
+      if (pend && !fila.length) pend.id = id; // o último toque: o celular confirma quando passar desse id
+    }
+  } catch (e) { erro = true; }
+  finally { enviando = false; desenhar(); }
 }
 async function buscar() {
   if (buscando) return;
   buscando = true;
-  try { const r = await rodar('estado', CHAVE); srv = r.estado || {}; ultOk = Date.now(); erro = false; }
-  catch (e) { erro = true; }
+  try {
+    await enviarFila();
+    const r = await rodar('estado', CHAVE);
+    srv = r.estado || {}; ultOk = Date.now(); erro = !!fila.length;
+    parado = !!(r.vivo && r.agora - r.vivo > 12000);
+  } catch (e) { erro = true; }
   finally { buscando = false; desenhar(); }
 }
 /** O que mostrar: o toque feito aqui vale até o celular confirmar (ou 20 s). */
+/** O que mostrar: o toque feito aqui vale até o celular ler os toques (mesmo que demore: celular dormindo). */
 function atual() {
-  if (pend && Date.now() < pend.ate && (!srv || !(srv.ts > pend.em))) return pend.estado;
-  pend = null;
+  if (pend) {
+    const lido = srv && (srv.cmd != null ? pend.id && srv.cmd >= pend.id : srv.ts > pend.em); // cmd: último toque que o celular leu
+    if (lido || Date.now() - pend.em > 15 * 60000) pend = null;
+    else return pend.estado;
+  }
   return srv;
 }
 function ligarSom() {
@@ -133,15 +160,17 @@ async function tocar() {
     cmd = { acao: 'comecar', ex: e.ex, nome: e.nome, serie: e.serie + 1, em };
     novo = { ...e, modo: 'exec', desde: em, serie: e.serie + 1 };
   }
-  pend = { estado: novo, em, ate: em + 20000 };
+  pend = { estado: novo, em, id: 0 };
+  fila.push(cmd);
   desenhar();
-  try { await rodar('comando', CHAVE, cmd); } catch (err) { pend = null; erro = true; desenhar(); }
+  enviarFila();
 }
 function desenhar() {
   const e = atual(), agora = Date.now();
   const anel = $('anel'), arco = $('arco'), btn = $('acao');
   const velho = !e || !e.ts || agora - e.ts > 4 * 3600e3;
-  $('ponto').className = 'ponto ' + (erro ? 'erro' : ultOk ? 'ok' : '');
+  const emTreino = e && e.modo && e.modo !== 'nenhum';
+  $('ponto').className = 'ponto ' + (erro ? 'erro' : parado && emTreino ? 'espera' : ultOk ? 'ok' : '');
   let rot = '', nome = '', t = '–:––', alvo = '', cls = 'anel', off = C, txtBtn = '', verde = false, rotCls = 'rot';
   if (!CHAVE) {
     rot = 'Sem chave'; nome = 'Abra pelo endereço com #chave'; t = '—'; cls += ' vazio';
@@ -181,7 +210,9 @@ function desenhar() {
   $('t').textContent = t; $('alvo').textContent = alvo;
   anel.className = cls; arco.setAttribute('stroke-dashoffset', off.toFixed(1));
   btn.hidden = !txtBtn; btn.textContent = txtBtn; btn.className = 'btn' + (verde ? ' verde' : '');
-  $('info').textContent = e && !velho && e.nItens ? e.feitos + '/' + e.nItens + ' feitos' : '';
+  $('info').textContent = erro && fila.length ? 'sem rede · toque guardado'
+    : parado && emTreino ? 'celular parado' + (pend ? ' · toque guardado' : '')
+    : e && !velho && e.nItens ? e.feitos + '/' + e.nItens + ' feitos' : '';
 }
 /** Em tela cheia a página ocupa a tela redonda; fora dela, o navegador mostra um retângulo no meio.
  *  Com a faixa do Google aberta no topo (o X fica fora da tela), a parte livre ainda contém um círculo
