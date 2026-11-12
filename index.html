@@ -116,6 +116,7 @@ async function buscar() {
     const r = await rodar('estado', CHAVE);
     srv = r.estado || {}; ultOk = Date.now(); erro = !!fila.length;
     parado = !!(r.vivo && r.agora - r.vivo > 12000);
+    telaLigada(!!srv.modo && srv.modo !== 'nenhum' && Date.now() - (srv.ts || 0) < 4 * 3600e3); // só com treino aberto
   } catch (e) { erro = true; }
   finally { buscando = false; desenhar(); }
 }
@@ -131,6 +132,27 @@ function atual() {
 }
 function ligarSom() {
   try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.resume) audio.resume(); } catch (e) {}
+}
+/** Mantém a tela do relógio ligada enquanto há treino aberto no celular (o navegador só deixa em https). */
+let wakeLock = null, pedindoTela = false;
+async function telaLigada(quer) {
+  if (pedindoTela || !navigator.wakeLock) return;
+  pedindoTela = true;
+  try {
+    if (quer && (!wakeLock || wakeLock.released) && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen');
+    else if (!quer && wakeLock && !wakeLock.released) { await wakeLock.release(); wakeLock = null; }
+  } catch (e) {}
+  finally { pedindoTela = false; }
+}
+/** No primeiro toque, pede tela cheia: em alguns navegadores esconde também a barra/menu deles. */
+let pediuCheia = false;
+function telaCheia() {
+  if (pediuCheia) return;
+  pediuCheia = true;
+  try {
+    const el = document.documentElement, f = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (f && !document.fullscreenElement) { const p = f.call(el); if (p && p.catch) p.catch(() => {}); }
+  } catch (e) {}
 }
 function bipe() {
   try {
@@ -212,7 +234,7 @@ function desenhar() {
   btn.hidden = !txtBtn; btn.textContent = txtBtn; btn.className = 'btn' + (verde ? ' verde' : '');
   $('info').textContent = erro && fila.length ? 'sem rede · toque guardado'
     : parado && emTreino ? 'celular parado' + (pend ? ' · toque guardado' : '')
-    : e && !velho && e.nItens ? e.feitos + '/' + e.nItens + ' feitos' : '';
+    : e && !velho && e.nItens ? e.feitos + '/' + e.nItens + ' feitos' + (wakeLock && !wakeLock.released ? ' ☼' : '') : ''; // ☼ = tela presa ligada
 }
 /** Em tela cheia a página ocupa a tela redonda; fora dela, o navegador mostra um retângulo no meio.
  *  Com a faixa do Google aberta no topo (o X fica fora da tela), a parte livre ainda contém um círculo
@@ -224,8 +246,8 @@ function forma() {
 addEventListener('resize', forma);
 forma();
 $('acao').addEventListener('click', tocar);
-document.addEventListener('click', ligarSom);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') buscar(); });
+document.addEventListener('click', () => { ligarSom(); telaCheia(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { wakeLock = null; buscar(); } });
 setInterval(desenhar, 250);
 setInterval(buscar, 3000);
 buscar();
