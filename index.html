@@ -82,6 +82,8 @@ let pend = null;         // toque feito aqui e ainda não aplicado pelo celular:
 let fila = [];           // toques ainda não entregues à ponte (rede caiu): reenviados na próxima consulta
 let parado = false;      // o celular parou de ler os toques (tela apagada / app em segundo plano)
 let buscando = false, enviando = false, ultOk = 0, erro = false, bipou = null, audio = null;
+let avisoAte = 0;        // até quando mostrar "toque antigo descartado"
+const MAX_TOQUE = 3 * 60000; // toque que não saiu do relógio em 3 min: descartado (o treino já seguiu)
 $('arco').setAttribute('stroke-dasharray', C);
 
 /** Chama a ponte; desiste em 10 s (com a rede ruim da academia, um pedido podia ficar pendurado e travar tudo). */
@@ -96,9 +98,21 @@ function rodar(fn, ...args) {
   return Promise.race([limite, fetch(API + '?' + p, { cache: 'no-store', signal: ac ? ac.signal : undefined }).then(r => r.json())
     .then(j => { if (j && j.erro) throw new Error(j.erro); return fn === 'comando' ? j.id : j; })]);
 }
+/** Joga fora os toques guardados que perderam o sentido: velhos demais, ou o celular mexeu no treino
+ *  depois deles (srv.ev = hora do último evento lá; um toque daqui que chegou vira evento com a hora do toque).
+ *  Os toques são encadeados (cada um parte do anterior): se um cai, caem todos. */
+function descartarVelhos() {
+  if (enviando || !fila.length) return;
+  const agora = Date.now();
+  if (!fila.some(c => agora - c.em > MAX_TOQUE || (srv && srv.ev > c.em + 5000))) return;
+  fila = [];
+  if (pend && !pend.id) pend = null; // volta a mostrar o que está no celular
+  avisoAte = agora + 8000;
+}
 /** Entrega os toques guardados, na ordem; se a rede falhar, ficam para a próxima. */
 async function enviarFila() {
   if (enviando) return;
+  descartarVelhos();
   enviando = true;
   try {
     while (fila.length) {
@@ -113,15 +127,17 @@ async function buscar() {
   if (buscando) return;
   buscando = true;
   try {
+    // primeiro o estado do celular: um toque guardado durante a queda de rede só é reenviado se ainda fizer sentido
+    try {
+      const r = await rodar('estado', CHAVE);
+      srv = r.estado || {}; ultOk = Date.now();
+      parado = !!(r.vivo && r.agora - r.vivo > 12000);
+      telaLigada(!!srv.modo && srv.modo !== 'nenhum' && Date.now() - (srv.ts || 0) < 4 * 3600e3); // só com treino aberto
+    } catch (e) { erro = true; }
     await enviarFila();
-    const r = await rodar('estado', CHAVE);
-    srv = r.estado || {}; ultOk = Date.now(); erro = !!fila.length;
-    parado = !!(r.vivo && r.agora - r.vivo > 12000);
-    telaLigada(!!srv.modo && srv.modo !== 'nenhum' && Date.now() - (srv.ts || 0) < 4 * 3600e3); // só com treino aberto
-  } catch (e) { erro = true; }
-  finally { buscando = false; desenhar(); }
+    erro = !!fila.length || Date.now() - ultOk > 10000;
+  } finally { buscando = false; desenhar(); }
 }
-/** O que mostrar: o toque feito aqui vale até o celular confirmar (ou 20 s). */
 /** O que mostrar: o toque feito aqui vale até o celular ler os toques (mesmo que demore: celular dormindo). */
 function atual() {
   if (pend) {
@@ -233,7 +249,9 @@ function desenhar() {
   $('t').textContent = t; $('alvo').textContent = alvo;
   anel.className = cls; arco.setAttribute('stroke-dashoffset', off.toFixed(1));
   btn.hidden = !txtBtn; btn.textContent = txtBtn; btn.className = 'btn' + (verde ? ' verde' : '');
-  $('info').textContent = erro && fila.length ? 'sem rede · toque guardado'
+  $('info').textContent = fila.length ? (agora - ultOk < 10000 ? 'enviando toque…' : 'sem rede · toque guardado')
+    : avisoAte > agora ? 'toque antigo descartado'
+    : erro ? 'sem rede'
     : parado && emTreino ? 'celular parado' + (pend ? ' · toque guardado' : '')
     : e && !velho && e.nItens ? e.feitos + '/' + e.nItens + ' feitos' + (wakeLock && !wakeLock.released ? ' ☼' : '') : ''; // ☼ = tela presa ligada
 }
