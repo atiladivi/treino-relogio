@@ -192,9 +192,14 @@ async function tocar() {
   if (e.modo === 'exec') {
     const ultima = e.total && e.serie >= e.total;
     cmd = { acao: 'terminei', ex: e.ex, nome: e.nome, serie: e.serie, em };
-    novo = ultima
-      ? { ...e, modo: e.proxNome ? 'desc' : 'fim', troca: true, desde: em, nome: e.proxNome, serie: 0, total: e.proxTotal, alvo: e.proxAlvo, ex: -1, feitos: e.feitos + 1 }
-      : { ...e, modo: 'desc', troca: false, desde: em };
+    // última série: segue para o próximo que o celular informou. O seguinte a ele só o celular sabe
+    // (prox* zerado): sem resposta do celular, depois desse o relógio espera em vez de inventar
+    // (em 25/11 ele voltou para "Adutora 1ª série" depois da última série da Adutora).
+    const feitos = (e.feitos || 0) + 1;
+    novo = !ultima ? { ...e, modo: 'desc', troca: false, desde: em }
+      : e.proxNome ? { ...e, modo: 'desc', troca: true, desde: em, nome: e.proxNome, serie: 0, total: e.proxTotal, alvo: e.proxAlvo, ex: -1, feitos,
+          proxNome: '', proxTotal: 0, proxAlvo: 0, proxDesconhecido: true }
+      : { ...e, modo: e.proxDesconhecido && feitos < (e.nItens || 0) ? 'espera' : 'fim', desde: em, feitos };
   } else {
     cmd = { acao: 'comecar', ex: e.ex, nome: e.nome, serie: e.serie + 1, em };
     novo = { ...e, modo: 'exec', desde: em, serie: e.serie + 1 };
@@ -204,11 +209,22 @@ async function tocar() {
   desenhar();
   enviarFila();
 }
+/** Celular parou de ler os toques (app em segundo plano / tela bloqueada): apita e pisca ao parar
+ *  e de novo a cada 2 min, para você abrir o app antes de perder séries. */
+let paradoDesde = 0, avisouParado = 0;
+function avisarParado(sim, agora) {
+  if (!sim) { paradoDesde = 0; avisouParado = 0; return; }
+  if (!paradoDesde) paradoDesde = agora;
+  if (agora - avisouParado < 120000) return;
+  avisouParado = agora; bipe();
+  const tl = $('tela'); tl.classList.remove('flash'); void tl.offsetWidth; tl.classList.add('flash');
+}
 function desenhar() {
   const e = atual(), agora = Date.now();
   const anel = $('anel'), arco = $('arco'), btn = $('acao');
   const velho = !e || !e.ts || agora - e.ts > 4 * 3600e3;
   const emTreino = e && e.modo && e.modo !== 'nenhum';
+  avisarParado(parado && emTreino && !velho, agora);
   $('ponto').className = 'ponto ' + (erro ? 'erro' : parado && emTreino ? 'espera' : ultOk ? 'ok' : '');
   let rot = '', nome = '', t = '–:––', alvo = '', cls = 'anel', off = C, txtBtn = '', verde = false, rotCls = 'rot';
   if (!CHAVE) {
@@ -219,6 +235,8 @@ function desenhar() {
     t = '—'; cls += ' vazio';
   } else if (e.modo === 'fim') {
     rot = 'Tudo feito'; nome = 'Conclua no celular'; t = '✓'; cls += ' vazio';
+  } else if (e.modo === 'espera') {
+    rot = 'Aguardando o celular'; nome = 'Abra o app no celular'; t = '…'; cls += ' vazio';
   } else {
     nome = e.nome || '';
     const de = e.total ? ' de ' + e.total : '';
@@ -252,7 +270,7 @@ function desenhar() {
   $('info').textContent = fila.length ? (agora - ultOk < 10000 ? 'enviando toque…' : 'sem rede · toque guardado')
     : avisoAte > agora ? 'toque antigo descartado'
     : erro ? 'sem rede'
-    : parado && emTreino ? 'celular parado' + (pend ? ' · toque guardado' : '')
+    : parado && emTreino ? 'celular parado ' + fmt(agora - (paradoDesde || agora)) + ' · abra o app'
     : e && !velho && e.nItens ? e.feitos + '/' + e.nItens + ' feitos' + (wakeLock && !wakeLock.released ? ' ☼' : '') : ''; // ☼ = tela presa ligada
 }
 /** Em tela cheia a página ocupa a tela redonda; fora dela, o navegador mostra um retângulo no meio.
