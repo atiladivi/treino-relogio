@@ -1,0 +1,50 @@
+# Compila o app Android (pasta android/) e publica o APK em
+# https://github.com/atiladivi/treino-relogio/releases/download/apk/treino.apk
+# A chave de assinatura vem dos secrets KS_B64 e KS_PASS (nunca do código).
+name: APK
+
+on:
+  push:
+    paths: ['android/**', '.github/workflows/apk.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Chave de assinatura
+        env:
+          KS_B64: ${{ secrets.KS_B64 }}
+        run: |
+          test -n "$KS_B64" || { echo "Falta o secret KS_B64"; exit 1; }
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/treino.p12"
+
+      - name: Compilar
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          KS_FILE: ${{ runner.temp }}/treino.p12
+          KS_PASS: ${{ secrets.KS_PASS }}
+        run: gradle -p android assembleRelease --no-daemon
+
+      - name: Publicar o APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk treino.apk
+          gh release delete apk --yes --cleanup-tag || true
+          gh release create apk treino.apk --title "Treino (versão ${{ github.run_number }})" \
+            --notes "APK do app Treino. Baixe no celular e instale por cima da versão anterior."
