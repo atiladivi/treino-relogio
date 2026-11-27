@@ -27,24 +27,32 @@ jobs:
           gradle-version: '8.7'
 
       - name: Chave de assinatura
+        id: chave
         env:
           KS_B64: ${{ secrets.KS_B64 }}
         run: |
-          test -n "$KS_B64" || { echo "Falta o secret KS_B64"; exit 1; }
+          if [ -z "$KS_B64" ]; then echo "tem=nao" >> "$GITHUB_OUTPUT"; echo "::warning::Sem os secrets KS_B64/KS_PASS: só confere se compila (APK não publicado)"; exit 0; fi
           echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/treino.p12"
+          echo "tem=sim" >> "$GITHUB_OUTPUT"
 
       - name: Compilar
         env:
           VERSION_CODE: ${{ github.run_number }}
           KS_FILE: ${{ runner.temp }}/treino.p12
           KS_PASS: ${{ secrets.KS_PASS }}
-        run: gradle -p android assembleRelease --no-daemon
+        run: |
+          tarefa=assembleRelease; [ "${{ steps.chave.outputs.tem }}" = sim ] || tarefa=assembleDebug
+          set -o pipefail
+          gradle -p android $tarefa --no-daemon 2>&1 | tee gradle.log || {
+            # erros viram anotações (dá para ler sem entrar no GitHub)
+            grep -E "^e: |error:|FAILURE|What went wrong" -A3 gradle.log | head -40 | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1; }
 
       - name: Publicar o APK
+        if: steps.chave.outputs.tem == 'sim'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp android/app/build/outputs/apk/release/app-release.apk treino.apk
           gh release delete apk --yes --cleanup-tag || true
-          gh release create apk treino.apk --title "Treino (versão ${{ github.run_number }})" \
-            --notes "APK do app Treino. Baixe no celular e instale por cima da versão anterior."
+          gh release create apk treino.apk --title "Treino (versão ${{ github.run_number }})"             --notes "APK do app Treino. Baixe no celular e instale por cima da versão anterior."
