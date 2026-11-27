@@ -24,7 +24,7 @@
   --t-m: #3c3489; --t-m-bg: #eeedfe; --t-i: #085041; --t-i-bg: #e1f5ee; --t-p: #633806; --t-p-bg: #faeeda;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root { color-scheme: dark;
     --bg: #0f1115; --surface: #181b21; --surface-2: #22262e; --line: #2d323c;
     --ink: #eceef2; --ink-2: #b4bac6; --ink-3: #868d9b;
     --accent: #6ea2f5; --accent-ink: #0b1220; --accent-soft: #1c2a42;
@@ -72,7 +72,7 @@ h3 { font-size: 15px; margin: 0; }
 .badge.good { background: var(--good-soft); color: var(--good); }
 label.field { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 10px; }
 label.field > * { display: block; width: 100%; margin-top: 4px; }
-input[type=date], select, textarea, input[type=text] { border: 1px solid var(--line); background: var(--surface);
+input[type=date], select, textarea, input[type=text], input[type=search], input:not([type]) { border: 1px solid var(--line); background: var(--surface); color: var(--ink);
   border-radius: 10px; padding: 9px 10px; }
 textarea { width: 100%; min-height: 64px; resize: vertical; }
 
