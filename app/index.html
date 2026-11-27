@@ -475,6 +475,10 @@ body.modo-foco #toast { bottom: calc(18px + env(safe-area-inset-bottom)); } /* p
 .lista-sheet .lfim .grande { padding: 14px; font-size: 16px; }
 /* guia de exercícios */
 .guia-busca { width: 100%; box-sizing: border-box; margin: 4px 0 6px; }
+.guia-g { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); margin-top: 10px; overflow: hidden; }
+.guia-h { display: flex; align-items: center; gap: 10px; width: 100%; padding: 14px; border: 0; background: none; cursor: pointer; text-align: left; font: inherit; color: var(--ink); }
+.guia-h b { flex: 1; font-size: 16px; font-weight: 650; } .guia-h i { font-style: normal; color: var(--ink-3); width: 14px; }
+.guia-g.aberto .guia { padding: 0 12px 12px; }
 .sec-g { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2); margin: 18px 0 8px; }
 .guia { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .guia .gi { display: flex; flex-direction: column; gap: 6px; padding: 0 0 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface);
@@ -2387,24 +2391,26 @@ function telaGuia() {
     <div id="guia-l">${guiaHtml()}</div>`;
 }
 function desenharGuia() { const el = document.getElementById('guia-l'); if (el) el.innerHTML = guiaHtml(); }
+/** Um menu por grupo muscular; toque abre os exercícios do grupo. Buscando, mostra os grupos que têm resultado já abertos. */
 function guiaHtml() {
   const tira = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const q = tira(S.guiaQ).trim();
-  const naFicha = new Set((X.dias.get(X.ativa) || []).flatMap(d => d.itens.map(i => i.exercicio)));
   const lista = (S.d.exercicios || []).filter(e => !q || tira(e.exercicio + ' ' + e.grupo + ' ' + (e.nomes || '')).includes(q));
   if (!lista.length) return `<div class="empty">Nenhum exercício encontrado.</div>`;
   const grupos = new Map();
-  [...lista].sort((a, b) => naFicha.has(b.exercicio) - naFicha.has(a.exercicio)).forEach(e => {
-    const g = q ? e.grupo : naFicha.has(e.exercicio) ? `Na ficha ${X.ativa}` : e.grupo;
-    if (!grupos.has(g)) grupos.set(g, []); grupos.get(g).push(e);
-  });
-  return [...grupos].map(([g, l]) => `<div class="sec-g">${esc(g)} <span class="muted">· ${l.length}</span></div>
-    <div class="guia">${l.map(e => {
-      const ft = fotoDe(e.exercicio);
-      return `<button class="gi" onclick="abrirFoto(${jsArg(e.exercicio)}, ${jsArg(e.grupo)})">
-        ${ft ? `<img src="${ft}" alt="" loading="lazy">` : `<span class="sem">${corpoSVG(e.grupo, ladoDoGrupo(e.grupo))}</span>`}
-        <b>${esc(e.exercicio)}</b></button>`;
-    }).join('')}</div>`).join('');
+  lista.forEach(e => { if (!grupos.has(e.grupo)) grupos.set(e.grupo, []); grupos.get(e.grupo).push(e); });
+  return [...grupos].map(([g, l]) => {
+    const aberto = !!q || S.guiaAberto === g;
+    return `<div class="guia-g ${aberto ? 'aberto' : ''}">
+      <button class="guia-h" style="${gStyle(g)}" onclick="S.guiaAberto = S.guiaAberto === ${jsArg(g)} ? null : ${jsArg(g)}; desenharGuia()">
+        <span class="gdot"></span><b>${esc(g)}</b><span class="muted">${l.length}</span><i>${aberto ? '▾' : '▸'}</i></button>
+      ${aberto ? `<div class="guia">${l.map(e => {
+        const ft = fotoDe(e.exercicio);
+        return `<button class="gi" onclick="abrirFoto(${jsArg(e.exercicio)}, ${jsArg(e.grupo)})">
+          ${ft ? `<img src="${ft}" alt="" loading="lazy">` : `<span class="sem">${corpoSVG(e.grupo, ladoDoGrupo(e.grupo))}</span>`}
+          <b>${esc(e.exercicio)}</b></button>`;
+      }).join('')}</div>` : ''}</div>`;
+  }).join('');
 }
 async function tornarAtiva(ficha) {
   $('#main').classList.add('busy');
