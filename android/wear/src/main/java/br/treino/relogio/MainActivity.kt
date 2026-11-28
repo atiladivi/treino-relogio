@@ -20,6 +20,7 @@ import android.text.TextUtils
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.wear.ambient.AmbientLifecycleObserver
 import kotlin.math.asin
@@ -27,7 +28,7 @@ import kotlin.math.asin
 /**
  * Tela do relógio (mockup claude.ai/artifact/LcLXFGQspEKgsC5AmMkQHd): botão em meia-lua embaixo,
  * arco do descanso na borda, fundo tingido pelo estado, bolinhas das séries.
- * Pulso baixado = modo ambiente (preto e cinza, gasta pouco); a vibração avisa o fim do descanso.
+ * Com treino aberto a tela fica sempre ligada; sem treino, pulso baixado = modo ambiente.
  * A chave da ponte chega uma vez pelo PC:
  *   adb shell am start -n br.treino.relogio/.MainActivity --es chave <CHAVE>
  */
@@ -36,8 +37,17 @@ class MainActivity : ComponentActivity() {
     private lateinit var tela: Tela
     private val h = Handler(Looper.getMainLooper())
 
+    private var telaPresa = false
+
     private val tique = object : Runnable {
         override fun run() {
+            // com treino aberto a tela não apaga (pedido do usuário); sem treino, o relógio apaga normalmente
+            val treino = Sincronia.emTreino(Sincronia.atual())
+            if (treino != telaPresa) {
+                telaPresa = treino
+                if (treino) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
             tela.invalidate()
             h.postDelayed(this, if (tela.ambiente) 1000 else 250)
         }
@@ -108,7 +118,7 @@ class Tela(ctx: Context, private val aoTocar: () -> Unit) : View(ctx) {
     private val MEDIO = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     private val NEGRITO = Typeface.create("sans-serif", Typeface.BOLD)
 
-    private val ALTURA_BOTAO = 140f   // em px do mockup (480)
+    private val ALTURA_BOTAO = 110f   // em px do mockup (480)
     private var topoBotao = Float.MAX_VALUE
     private var temBotao = false
     private var nomeCache = ""; private var nomeLarg = 0; private var nomeLayout: StaticLayout? = null
@@ -174,8 +184,9 @@ class Tela(ctx: Context, private val aoTocar: () -> Unit) : View(ctx) {
                     i == v.feitas -> { p.style = Paint.Style.STROKE; p.strokeWidth = 3f * k
                         p.color = if (amb) CINZA else ARCO[maxOf(1, v.fase)]
                         c.drawCircle(X(x + dA / 2), Y(y), (dA - 3f) / 2 * k, p); x += dA + gap }
-                    else -> { p.style = Paint.Style.STROKE; p.strokeWidth = 2f * k; p.color = cor("#4a5263")
-                        c.drawCircle(X(x + d / 2), Y(y), (d - 2f) / 2 * k, p); x += d + gap }
+                    else -> { p.style = Paint.Style.STROKE; p.strokeWidth = 2.5f * k   // por fazer: aro na cor do estado
+                        p.color = if (amb) CINZA_ESC else ARCO[maxOf(1, v.fase)]
+                        c.drawCircle(X(x + d / 2), Y(y), (d - 2.5f) / 2 * k, p); x += d + gap }
                 }
             }
             if (n > 0) x += 8f
@@ -217,7 +228,7 @@ class Tela(ctx: Context, private val aoTocar: () -> Unit) : View(ctx) {
             }
             c.restore()
             val corTxt = if (amb) CINZA else if (v.botaoVerde) cor("#04150c") else Color.WHITE
-            texto(c, v.botao, cx, Y(topo + ALTURA_BOTAO * .5f), 34f * k, corTxt, 300f * k, NEGRITO, .04f)
+            texto(c, v.botao, cx, Y(topo + ALTURA_BOTAO * .5f), 32f * k, corTxt, 260f * k, NEGRITO)
         }
     }
 
