@@ -20,6 +20,7 @@
 
         <!-- funciona sozinho (fala com a ponte pela internet), sem app companheiro no celular -->
         <meta-data android:name="com.google.android.wearable.standalone" android:value="true" />
+        <uses-library android:name="com.google.android.wearable" android:required="false" />
 
         <activity
             android:name=".MainActivity"

@@ -48,6 +48,7 @@ class RelogioService : Service() {
             when (Sincronia.alerta()) {
                 Sincronia.Alerta.DESCANSO -> avisar(longArrayOf(0, 500, 200, 500, 200, 500), 3)
                 Sincronia.Alerta.PARADO -> avisar(longArrayOf(0, 250, 150, 250, 150, 250, 150, 250), 2)
+                Sincronia.Alerta.DEZ -> avisar(longArrayOf(0, 180), 0)
                 Sincronia.Alerta.NENHUM -> {}
             }
             val treino = Sincronia.emTreino(Sincronia.atual())
@@ -117,7 +118,7 @@ class RelogioService : Service() {
             // "alarme": vibra mesmo no modo não perturbe / hora de dormir
             vib.vibrate(efeito, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
         } catch (e: Exception) {}
-        try {
+        if (bipes > 0) try {
             val tg = ToneGenerator(AudioManager.STREAM_ALARM, 80)
             repeat(bipes) { i -> h.postDelayed({ tg.startTone(ToneGenerator.TONE_PROP_BEEP, 180) }, i * 350L) }
             h.postDelayed({ tg.release() }, bipes * 350L + 400)

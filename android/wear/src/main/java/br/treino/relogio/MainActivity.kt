@@ -1,48 +1,52 @@
 package br.treino.relogio
 
 import android.Manifest
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.Layout
+import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.TextUtils
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
-import android.view.WindowManager
+import androidx.activity.ComponentActivity
+import androidx.wear.ambient.AmbientLifecycleObserver
+import kotlin.math.asin
 
 /**
- * Tela do relógio: a mesma da página (rótulo, exercício, anel com o tempo, botão grande).
+ * Tela do relógio (mockup claude.ai/artifact/LcLXFGQspEKgsC5AmMkQHd): botão em meia-lua embaixo,
+ * arco do descanso na borda, fundo tingido pelo estado, bolinhas das séries.
+ * Pulso baixado = modo ambiente (preto e cinza, gasta pouco); a vibração avisa o fim do descanso.
  * A chave da ponte chega uma vez pelo PC:
  *   adb shell am start -n br.treino.relogio/.MainActivity --es chave <CHAVE>
  */
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
 
     private lateinit var tela: Tela
     private val h = Handler(Looper.getMainLooper())
-    private var telaPresa = false
 
     private val tique = object : Runnable {
         override fun run() {
-            val treino = Sincronia.emTreino(Sincronia.atual())
-            if (treino != telaPresa) { // com treino aberto a tela não apaga (como na página)
-                telaPresa = treino
-                if (treino) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            }
-            tela.telaPresa = telaPresa
             tela.invalidate()
-            h.postDelayed(this, 250)
+            h.postDelayed(this, if (tela.ambiente) 1000 else 250)
         }
+    }
+
+    private val ambiente = object : AmbientLifecycleObserver.AmbientLifecycleCallback {
+        override fun onEnterAmbient(ambientDetails: AmbientLifecycleObserver.AmbientDetails) { tela.ambiente = true; tela.invalidate() }
+        override fun onUpdateAmbient() { tela.invalidate() }
+        override fun onExitAmbient() { tela.ambiente = false; tela.invalidate(); Sincronia.buscar() }
     }
 
     override fun onCreate(b: Bundle?) {
@@ -51,6 +55,7 @@ class MainActivity : Activity() {
         lerChave(intent)
         tela = Tela(this) { if (Sincronia.tocar()) { tela.performHapticFeedback(HapticFeedbackConstants.CONFIRM); tela.invalidate() } }
         setContentView(tela)
+        lifecycle.addObserver(AmbientLifecycleObserver(this, ambiente))
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
     }
@@ -80,93 +85,172 @@ class MainActivity : Activity() {
     }
 }
 
-/** Desenha tudo dentro do círculo da tela (medidas em frações do lado do quadrado inscrito). */
+/** Desenha tudo em unidades de um relógio de 480 px (o mockup) e escala para a tela real. */
 class Tela(ctx: Context, private val aoTocar: () -> Unit) : View(ctx) {
 
-    var telaPresa = false
+    var ambiente = false
+    private var apertado = false
 
-    private val AZUL = Color.parseColor("#4f8ff7")
-    private val VERDE = Color.parseColor("#34c27a")
-    private val VERMELHO = Color.parseColor("#f05a4f")
-    private val AMARELO = Color.parseColor("#f2c14e")
-    private val TINTA = Color.parseColor("#f2f4f7")
-    private val TINTA2 = Color.parseColor("#9aa4b5")
-    private val LINHA = Color.parseColor("#262b34")
+    private fun cor(s: String) = Color.parseColor(s)
+    private val AZUL = cor("#4f8ff7"); private val VERDE = cor("#34c27a"); private val VERMELHO = cor("#f05a4f")
+    private val AMARELO = cor("#f2c14e"); private val TINTA = cor("#f2f4f7"); private val TINTA2 = cor("#9aa4b5")
+    private val CINZA = cor("#8a93a3"); private val CINZA_ESC = cor("#3a414d")
 
-    private val txt = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL); textAlign = Paint.Align.CENTER
-    }
-    private val forte = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create("sans-serif", Typeface.BOLD); textAlign = Paint.Align.CENTER; fontFeatureSettings = "tnum"
-    }
-    private val anel = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
-    private val pinta = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val botao = RectF()
+    // por fase: 0 nada, 1 série, 2 descanso, 3 estourado, 4 primeiro/próximo
+    private val FUNDO = intArrayOf(Color.BLACK, cor("#071733"), cor("#06200f"), cor("#2a0b09"), cor("#06200f"))
+    private val ROTULO = intArrayOf(cor("#8db8ff"), cor("#8db8ff"), cor("#6fe0a5"), cor("#ff9a90"), cor("#6fe0a5"))
+    private val ARCO = intArrayOf(0, AZUL, VERDE, VERMELHO, VERDE)
+
+    private val txt = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+    private val nomeP = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) }
+    private val arcoP = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val MEDIO = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    private val NEGRITO = Typeface.create("sans-serif", Typeface.BOLD)
+
+    private val ALTURA_BOTAO = 140f   // em px do mockup (480)
+    private var topoBotao = Float.MAX_VALUE
     private var temBotao = false
+    private var nomeCache = ""; private var nomeLarg = 0; private var nomeLayout: StaticLayout? = null
+    private val circulo = Path()
 
-    private fun escrever(c: Canvas, p: TextPaint, s: String, x: Float, y: Float, tam: Float, cor: Int, larg: Float) {
-        p.textSize = tam; p.color = cor
-        c.drawText(TextUtils.ellipsize(s, p, larg, TextUtils.TruncateAt.END).toString(), x, y, p)
+    private fun texto(c: Canvas, s: String, x: Float, y: Float, tam: Float, cor: Int, larg: Float, tf: Typeface, esp: Float = 0f) {
+        txt.textSize = tam; txt.color = cor; txt.typeface = tf; txt.letterSpacing = esp
+        c.drawText(TextUtils.ellipsize(s, txt, larg, TextUtils.TruncateAt.END).toString(), x, y, txt)
     }
 
     override fun onDraw(c: Canvas) {
-        val agora = System.currentTimeMillis()
-        // fundo: pisca em vermelho escuro duas vezes no fim do descanso / celular parado
-        val df = agora - Sincronia.flashDesde
-        var fundo = Color.BLACK
-        if (df in 0..2399) {
+        val v = Sincronia.visual()
+        val s = minOf(width, height).toFloat()
+        val k = s / 480f
+        val ox = (width - s) / 2; val oy = (height - s) / 2
+        fun X(u: Float) = ox + u * k
+        fun Y(u: Float) = oy + u * k
+        val cx = X(240f)
+        val amb = ambiente
+
+        // fundo tingido pelo estado; pisca em vermelho no fim do descanso / celular parado
+        var fundo = if (amb) Color.BLACK else FUNDO[v.fase]
+        val df = System.currentTimeMillis() - Sincronia.flashDesde
+        if (!amb && df in 0..2399) {
             val f = (df % 1200) / 1200f
-            val k = if (f < .3f) f / .3f else (1 - f) / .7f
-            fundo = Color.rgb((0x3a * k).toInt(), (0x12 * k).toInt(), (0x10 * k).toInt())
+            val q = if (f < .3f) f / .3f else (1 - f) / .7f
+            fundo = misturar(fundo, cor("#5a1410"), q)
         }
         c.drawColor(fundo)
 
-        val v = Sincronia.visual(telaPresa)
-        val s = minOf(width, height).toFloat()
-        val ox = (width - s) / 2; val oy = (height - s) / 2
-        val cx = width / 2f
-        fun y(f: Float) = oy + f * s
-
-        escrever(c, txt, v.rot.uppercase(), cx, y(.155f), .055f * s, if (v.rotVerde) VERDE else AZUL, .62f * s)
-        escrever(c, txt, v.nome, cx, y(.235f), .068f * s, TINTA, .78f * s)
-
-        // anel
-        val cy = y(.5f); val r = .22f * s
-        anel.strokeWidth = .0375f * s
-        anel.color = LINHA
-        c.drawCircle(cx, cy, r, anel)
-        if (v.corArco != 0 && v.arco > 0f) {
-            anel.color = when (v.corArco) { 1 -> AZUL; 3 -> VERMELHO; else -> VERDE }
-            c.drawArc(cx - r, cy - r, cx + r, cy + r, -90f, 360f * v.arco, false, anel)
-        }
-        escrever(c, forte, v.t, cx, cy + .055f * s, .15f * s, TINTA, .4f * s)
-        if (v.alvo.isNotEmpty()) escrever(c, txt, v.alvo, cx, cy + .15f * s, .046f * s, TINTA2, .3f * s)
-
-        // linha de cima do anel: ponto de conexão + informação
-        txt.textSize = .042f * s
-        val info = TextUtils.ellipsize(v.info, txt, .36f * s, TextUtils.TruncateAt.END).toString()
-        val li = txt.measureText(info); val pr = .012f * s
-        val iy = cy - .115f * s
-        pinta.color = when (v.ponto) { 1 -> VERDE; 2 -> VERMELHO; 3 -> AMARELO; else -> LINHA }
-        val x0 = cx - (li + (if (info.isEmpty()) 0f else pr * 2 + .012f * s)) / 2
-        c.drawCircle(x0 + pr, iy - pr * .9f, pr, pinta)
-        if (info.isNotEmpty()) { txt.color = TINTA2; c.drawText(info, x0 + pr * 2 + .012f * s + li / 2, iy, txt) }
-
-        // botão
         temBotao = v.botao.isNotEmpty()
-        botao.set(cx - .29f * s, y(.765f), cx + .29f * s, y(.895f))
+        val topo = 480f - ALTURA_BOTAO
+
+        // arco da borda (parte de cima, até pouco acima da meia-lua)
+        if (v.fase != 0) {
+            val r = 226f
+            val yFim = (if (temBotao) topo - 14f else 330f) - 240f
+            val ang = Math.toDegrees(asin((yFim / r).toDouble())).toFloat() // abaixo da horizontal
+            val ini = 180f - ang; val total = 180f + 2 * ang
+            val oval = RectF(X(240f - r), Y(240f - r), X(240f + r), Y(240f + r))
+            arcoP.strokeWidth = (if (amb) 6f else 14f) * k
+            arcoP.color = if (amb) cor("#1a1d23") else Color.argb(20, 255, 255, 255)
+            c.drawArc(oval, ini, total, false, arcoP)
+            if (v.arco > 0f) {
+                arcoP.color = if (amb) CINZA else ARCO[v.fase]
+                arcoP.alpha = if (!amb && v.fase == 1) 115 else 255
+                c.drawArc(oval, ini, total * v.arco.coerceIn(0f, 1f), false, arcoP)
+                arcoP.alpha = 255
+            }
+        }
+
+        // bolinhas das séries + ponto da conexão
+        run {
+            val n = v.series
+            val d = 14f; val dA = 18f; val gap = 10f; val dc = 8f
+            val larg = (if (n > 0) n * d + (dA - d) + (n - 1) * gap + 8f + gap else 0f) + dc
+            var x = 240f - larg / 2
+            val y = 51f
+            for (i in 0 until n) {
+                when {
+                    i < v.feitas -> { p.style = Paint.Style.FILL; p.color = if (amb) cor("#5b6372") else TINTA
+                        c.drawCircle(X(x + d / 2), Y(y), d / 2 * k, p); x += d + gap }
+                    i == v.feitas -> { p.style = Paint.Style.STROKE; p.strokeWidth = 3f * k
+                        p.color = if (amb) CINZA else ARCO[maxOf(1, v.fase)]
+                        c.drawCircle(X(x + dA / 2), Y(y), (dA - 3f) / 2 * k, p); x += dA + gap }
+                    else -> { p.style = Paint.Style.STROKE; p.strokeWidth = 2f * k; p.color = cor("#4a5263")
+                        c.drawCircle(X(x + d / 2), Y(y), (d - 2f) / 2 * k, p); x += d + gap }
+                }
+            }
+            if (n > 0) x += 8f
+            p.style = Paint.Style.FILL
+            p.color = if (amb) CINZA_ESC else when (v.ponto) { 1 -> VERDE; 2 -> VERMELHO; 3 -> AMARELO; else -> CINZA_ESC }
+            c.drawCircle(X(x + dc / 2), Y(y), dc / 2 * k, p)
+        }
+
+        // rótulo e nome (até 2 linhas)
+        texto(c, v.rot, cx, Y(98f), 18f * k, if (amb) CINZA else ROTULO[v.fase], 300f * k, NEGRITO, .08f)
+        val nl = desenharNome(c, v.nome, cx, Y(134f), k, if (amb) cor("#aab2c0") else TINTA)
+
+        // tempo grande e a linha de baixo
+        val yT = if (nl > 1) 266f else 258f
+        txt.textSize = 104f * k; txt.typeface = NEGRITO; txt.letterSpacing = -.02f; txt.fontFeatureSettings = "tnum"
+        if (amb) {
+            txt.style = Paint.Style.STROKE; txt.strokeWidth = 2f * k; txt.color = cor("#aab2c0")
+        } else {
+            txt.style = Paint.Style.FILL; txt.color = if (v.fase == 3) cor("#ff7b70") else TINTA
+        }
+        c.drawText(v.t, cx, Y(yT), txt)
+        txt.style = Paint.Style.FILL; txt.fontFeatureSettings = null
+        if (v.sub.isNotEmpty())
+            texto(c, v.sub, cx, Y(yT + 42f), 22f * k, if (v.aviso && !amb) AMARELO else TINTA2, 330f * k, MEDIO)
+
+        // meia-lua
+        topoBotao = Y(topo)
         if (temBotao) {
-            pinta.color = if (v.botaoVerde) VERDE else AZUL
-            c.drawRoundRect(botao, botao.height() / 2, botao.height() / 2, pinta)
-            escrever(c, forte, v.botao, cx, botao.centerY() + .024f * s, .068f * s,
-                if (v.botaoVerde) Color.parseColor("#04150c") else Color.WHITE, botao.width() * .9f)
+            circulo.reset(); circulo.addCircle(cx, Y(240f), s / 2, Path.Direction.CW)
+            c.save(); c.clipPath(circulo)
+            if (amb) {
+                p.style = Paint.Style.STROKE; p.strokeWidth = 2f * k; p.color = CINZA_ESC
+                c.drawLine(ox, Y(topo), ox + s, Y(topo), p)
+            } else {
+                p.style = Paint.Style.FILL
+                p.color = if (v.botaoVerde) VERDE else AZUL
+                if (apertado) p.color = misturar(p.color, Color.BLACK, .25f)
+                c.drawRect(ox, Y(topo), ox + s, oy + s, p)
+            }
+            c.restore()
+            val corTxt = if (amb) CINZA else if (v.botaoVerde) cor("#04150c") else Color.WHITE
+            texto(c, v.botao, cx, Y(topo + ALTURA_BOTAO * .5f), 34f * k, corTxt, 300f * k, NEGRITO, .04f)
         }
     }
 
+    /** Nome do exercício em até 2 linhas, centrado; devolve quantas linhas usou. */
+    private fun desenharNome(c: Canvas, nome: String, cx: Float, baseline: Float, k: Float, cor: Int): Int {
+        if (nome.isEmpty()) return 0
+        val larg = (340f * k).toInt()
+        if (nome != nomeCache || larg != nomeLarg || nomeLayout == null) {
+            nomeP.textSize = 30f * k
+            nomeLayout = StaticLayout.Builder.obtain(nome, 0, nome.length, nomeP, larg)
+                .setAlignment(Layout.Alignment.ALIGN_CENTER).setMaxLines(2).setEllipsize(TextUtils.TruncateAt.END)
+                .setLineSpacing(0f, 1.05f).build()
+            nomeCache = nome; nomeLarg = larg
+        }
+        val l = nomeLayout!!
+        nomeP.color = cor
+        c.save(); c.translate(cx - larg / 2f, baseline - l.getLineBaseline(0)); l.draw(c); c.restore()
+        return l.lineCount
+    }
+
+    private fun misturar(a: Int, b: Int, q: Float): Int {
+        val t = q.coerceIn(0f, 1f)
+        return Color.rgb((Color.red(a) + (Color.red(b) - Color.red(a)) * t).toInt(),
+            (Color.green(a) + (Color.green(b) - Color.green(a)) * t).toInt(),
+            (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t).toInt())
+    }
+
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        if (e.actionMasked == MotionEvent.ACTION_UP && temBotao) {
-            val folga = .04f * minOf(width, height)
-            if (e.x in botao.left - folga..botao.right + folga && e.y in botao.top - folga..botao.bottom + folga) aoTocar()
+        val dentro = temBotao && !ambiente && e.y >= topoBotao - 12f * minOf(width, height) / 480f
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { apertado = dentro; invalidate() }
+            MotionEvent.ACTION_UP -> { val era = apertado; apertado = false; invalidate(); if (era && dentro) aoTocar() }
+            MotionEvent.ACTION_CANCEL -> { apertado = false; invalidate() }
         }
         return true
     }

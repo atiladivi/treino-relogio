@@ -172,7 +172,8 @@ object Sincronia {
         return true
     }
 
-    enum class Alerta { NENHUM, DESCANSO, PARADO }
+    enum class Alerta { NENHUM, DEZ, DESCANSO, PARADO }
+    private var avisou10 = 0L
 
     /** Chamado a cada meio segundo pelo serviço: fim do descanso (uma vez por descanso) e celular parado
      *  (ao parar e de novo a cada 2 min). */
@@ -189,24 +190,30 @@ object Sincronia {
             if (alvo > 0 && dt >= alvo && dt < alvo + 15000 && bipou != desde) {
                 bipou = desde; flashDesde = agora; return Alerta.DESCANSO
             }
+            // "faltam 10 s": uma vibração curta (só em descansos de 20 s ou mais)
+            if (alvo >= 20000 && dt >= alvo - 10000 && dt < alvo - 7000 && avisou10 != desde) {
+                avisou10 = desde; return Alerta.DEZ
+            }
         }
         return Alerta.NENHUM
     }
 
     // ---------- o que desenhar ----------
 
+    /** O que a tela mostra (desenho do mockup claude.ai/artifact/LcLXFGQspEKgsC5AmMkQHd). */
     class Visual {
-        var rot = ""; var rotVerde = false; var nome = ""; var t = "–:––"; var alvo = ""
-        var arco = 0f            // 0..1 (parte cheia do anel)
-        var corArco = 0          // 0 = sem arco, 1 = série (azul), 2 = descanso (verde), 3 = passou (vermelho)
+        var fase = 0             // 0 sem treino/fim/espera, 1 série, 2 descanso, 3 descanso estourado, 4 primeiro/próximo
+        var rot = ""; var nome = ""; var t = "—"; var sub = ""
+        var aviso = false        // sub é um aviso (rede / celular parado): amarelo
+        var arco = 0f            // 0..1 (parte cheia do arco da borda)
         var botao = ""; var botaoVerde = false
+        var series = 0; var feitas = 0   // bolinhas: total de séries do exercício e quantas já foram
         var ponto = 0            // 0 cinza, 1 ok, 2 erro, 3 celular parado
-        var info = ""
     }
 
     private fun fmt(ms: Long): String { val s = maxOf(0L, ms / 1000); return "${s / 60}:" + (s % 60).toString().padStart(2, '0') }
 
-    fun visual(telaPresa: Boolean): Visual {
+    fun visual(): Visual {
         val v = Visual()
         val e = atual(); val agora = System.currentTimeMillis()
         val velho = e == null || e.optLong("ts") == 0L || agora - e.optLong("ts") > 4 * 3600e3
@@ -214,52 +221,58 @@ object Sincronia {
         val treino = modo.isNotEmpty() && modo != "nenhum"
         v.ponto = if (erro) 2 else if (parado && treino) 3 else if (ultOk > 0) 1 else 0
         when {
-            chave.isEmpty() -> { v.rot = "Sem chave"; v.nome = "Instale a chave pelo PC"; v.t = "—" }
+            chave.isEmpty() -> { v.rot = "SEM CHAVE"; v.nome = "Instale a chave pelo PC" }
             e == null || velho || modo == "nenhum" -> {
                 val tentou = ultOk > 0 || erro
-                v.rot = if (tentou) "Sem treino" else "Conectando…"
+                v.rot = if (tentou) "SEM TREINO" else "CONECTANDO…"
                 v.nome = if (tentou) "Abra o treino no celular" else ""
-                v.t = "—"
             }
-            modo == "fim" -> { v.rot = "Tudo feito"; v.nome = "Conclua no celular"; v.t = "✓" }
-            modo == "espera" -> { v.rot = "Aguardando o celular"; v.nome = "Abra o app no celular"; v.t = "…" }
+            modo == "fim" -> { v.rot = "TUDO FEITO"; v.nome = "Conclua no celular"; v.t = "✓" }
+            modo == "espera" -> { v.rot = "AGUARDANDO O CELULAR"; v.nome = "Abra o app no celular"; v.t = "…" }
             else -> {
                 v.nome = e.optString("nome")
                 val serie = e.optInt("serie"); val total = e.optInt("total")
-                val de = if (total > 0) " de $total" else ""
                 val desde = e.optLong("desde")
+                v.series = minOf(total, 8)
+                val nItens = e.optInt("nItens")
                 when (modo) {
                     "exec" -> {
-                        v.rot = "Série $serie$de"; v.corArco = 1; v.arco = 1f; v.t = fmt(agora - desde)
-                        v.botao = "✓ Terminei"
+                        v.fase = 1; v.feitas = serie - 1
+                        v.rot = "SÉRIE $serie" + if (total > 0) " DE $total" else ""
+                        v.t = fmt(agora - desde); v.arco = 1f
+                        v.sub = if (nItens > 0) "exercício ${e.optInt("feitos") + 1} de $nItens" else ""
+                        v.botao = "✓ TERMINEI"
                     }
                     "desc" -> {
                         val dt = agora - desde
                         val troca = e.optBoolean("troca")
-                        v.rot = if (troca) "Próximo" else "Descanso · ${serie}ª feita"; v.rotVerde = troca
-                        v.t = fmt(dt)
+                        v.feitas = serie
                         val alvo = e.optLong("alvo") * 1000
-                        if (alvo > 0) {
-                            v.alvo = "ficha " + fmt(alvo)
-                            v.arco = 1f - minOf(1f, dt.toFloat() / alvo)
-                            v.corArco = if (dt > alvo) 3 else 2
-                        } else { v.arco = 1f; v.corArco = 2 }
-                        v.botao = "▶ ${serie + 1}ª série"; v.botaoVerde = true
+                        if (alvo > 0 && dt > alvo) {
+                            v.fase = 3; v.rot = "PASSOU DO DESCANSO"; v.t = "+" + fmt(dt - alvo); v.arco = 1f
+                            v.sub = "ficha " + fmt(alvo)
+                        } else if (alvo > 0) {
+                            v.fase = 2; v.t = fmt(alvo - dt + 999); v.arco = 1f - dt.toFloat() / alvo
+                            v.sub = "de " + fmt(alvo)
+                        } else {
+                            v.fase = 2; v.t = fmt(dt); v.arco = 1f
+                        }
+                        if (v.fase == 2) v.rot = if (troca) "PRÓXIMO" else "DESCANSO"
+                        v.botao = "▶ ${serie + 1}ª SÉRIE"; v.botaoVerde = true
                     }
-                    else -> { v.rot = "Primeiro"; v.t = "0:00"; v.botao = "▶ 1ª série"; v.botaoVerde = true }
+                    else -> { v.fase = 4; v.rot = "PRIMEIRO"; v.t = "0:00"; v.botao = "▶ 1ª SÉRIE"; v.botaoVerde = true }
                 }
-                if (e.optBoolean("pausado")) { v.rot = "Pausado no celular"; v.botao = "" }
+                if (e.optBoolean("pausado")) { v.rot = "PAUSADO NO CELULAR"; v.botao = "" }
             }
         }
-        val fila = temFila()
-        v.info = when {
-            fila -> if (agora - ultOk < 10000) "enviando toque…" else "sem rede · toque guardado"
+        val aviso = when {
+            temFila() -> if (agora - ultOk < 10000) "enviando toque…" else "sem rede · toque guardado"
             avisoAte > agora -> "toque antigo descartado"
             erro -> "sem rede"
-            parado && treino -> "celular parado " + fmt(agora - (if (paradoDesde > 0) paradoDesde else agora)) + " · abra o app"
-            e != null && !velho && e.optInt("nItens") > 0 -> "${e.optInt("feitos")}/${e.optInt("nItens")} feitos" + if (telaPresa) " ☼" else ""
+            parado && treino -> "celular parado " + fmt(agora - (if (paradoDesde > 0) paradoDesde else agora))
             else -> ""
         }
+        if (aviso.isNotEmpty()) { v.sub = aviso; v.aviso = true }
         return v
     }
 }
