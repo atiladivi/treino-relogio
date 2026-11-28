@@ -1,11 +1,13 @@
 package br.treino.relogio
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.media.AudioManager
 import android.media.ToneGenerator
@@ -21,6 +23,13 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
+import androidx.health.services.client.HealthServices
+import androidx.health.services.client.MeasureCallback
+import androidx.health.services.client.data.Availability
+import androidx.health.services.client.data.DataPointContainer
+import androidx.health.services.client.data.DataType
+import androidx.health.services.client.data.DeltaDataType
+import kotlin.math.roundToInt
 
 /**
  * Serviço em primeiro plano: continua lendo o celular a cada 3 s e vibra no fim do descanso
@@ -40,6 +49,7 @@ class RelogioService : Service() {
     private var ultimoAtivo = 0L
     private var ultimaBusca = 0L
     private var iniciado = false
+    private var notif: NotificationCompat.Builder? = null
 
     private val tique = object : Runnable {
         override fun run() {
@@ -54,6 +64,8 @@ class RelogioService : Service() {
             val treino = Sincronia.emTreino(Sincronia.atual())
             if (treino || Sincronia.visivel) ultimoAtivo = agora
             processadorLigado(treino)
+            batimentos(treino)
+            if (treino && agora - ultimoEnvioFc >= 15000) { ultimoEnvioFc = agora; Sincronia.enviarFc() }
             if (agora - ultimoAtivo > 10 * 60000L) { stopSelf(); return }
             h.postDelayed(this, 500)
         }
@@ -92,13 +104,46 @@ class RelogioService : Service() {
                 .setStatus(Status.Builder().addTemplate("Treino").build())
                 .build()
                 .apply(applicationContext)
-            val tipo = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
-            ServiceCompat.startForeground(this, ID, b.build(), tipo)
+            notif = b
+            comSaude = checkSelfPermission(Manifest.permission.BODY_SENSORS) == PackageManager.PERMISSION_GRANTED
+            try { ServiceCompat.startForeground(this, ID, b.build(), tipos(comSaude)) }
+            catch (e: Exception) { comSaude = false; ServiceCompat.startForeground(this, ID, b.build(), tipos(false)) }
             ultimoAtivo = System.currentTimeMillis()
             h.post(tique)
         }
         return START_NOT_STICKY
     }
+
+    // ---------- batimentos (Health Services do relógio; só com treino aberto e com a permissão dada) ----------
+    private var ultimoEnvioFc = 0L
+    private var medindo = false
+    private var comSaude = false   // o serviço já declarou o tipo "saúde" (exigido para ler o sensor em segundo plano)
+    private val medida by lazy { HealthServices.getClient(this).measureClient }
+    private val cbFc = object : MeasureCallback {
+        override fun onAvailabilityChanged(dataType: DeltaDataType<*, *>, availability: Availability) {}
+        override fun onDataReceived(data: DataPointContainer) {
+            val v = data.getData(DataType.HEART_RATE_BPM).lastOrNull()?.value ?: return
+            if (v > 20) Sincronia.novaFc(v.roundToInt())
+        }
+    }
+
+    private fun batimentos(treino: Boolean) {
+        val pode = checkSelfPermission(Manifest.permission.BODY_SENSORS) == PackageManager.PERMISSION_GRANTED
+        if (pode && !comSaude && Sincronia.visivel) {
+            // a permissão chegou depois do serviço começar: declara o tipo "saúde" agora (só dá com o app na tela)
+            try { ServiceCompat.startForeground(this, ID, notif!!.build(), tipos(true)); comSaude = true } catch (e: Exception) {}
+        }
+        val quer = treino && pode
+        if (quer && !medindo) {
+            try { medida.registerMeasureCallback(DataType.HEART_RATE_BPM, cbFc); medindo = true } catch (e: Exception) {}
+        } else if (!quer && medindo) {
+            try { medida.unregisterMeasureCallbackAsync(DataType.HEART_RATE_BPM, cbFc) } catch (e: Exception) {}
+            medindo = false
+        }
+    }
+
+    private fun tipos(saude: Boolean) =
+        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or (if (saude) ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH else 0)
 
     /** Com treino aberto, o processador fica acordado com a tela apagada (a leitura de 3 s continua). */
     private fun processadorLigado(sim: Boolean) {
@@ -127,6 +172,7 @@ class RelogioService : Service() {
 
     override fun onDestroy() {
         h.removeCallbacks(tique)
+        if (medindo) try { medida.unregisterMeasureCallbackAsync(DataType.HEART_RATE_BPM, cbFc) } catch (e: Exception) {}
         trava?.let { if (it.isHeld) it.release() }
         super.onDestroy()
     }

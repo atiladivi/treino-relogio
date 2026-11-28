@@ -43,4 +43,6 @@ dependencies {
     implementation("androidx.wear:wear-ongoing:1.0.0")
     implementation("androidx.wear:wear:1.3.0")          // modo ambiente (pulso baixado)
     implementation("androidx.activity:activity-ktx:1.9.3")
+    implementation("androidx.health:health-services-client:1.0.0") // batimentos
+    implementation("com.google.guava:guava:33.3.1-android")          // ListenableFuture do Health Services
 }

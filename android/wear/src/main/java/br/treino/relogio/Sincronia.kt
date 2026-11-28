@@ -114,6 +114,35 @@ object Sincronia {
         avisoAte = agora + 8000
     }
 
+    // ---------- batimentos ----------
+
+    @Volatile var fc = 0; private set          // última leitura (bpm)
+    @Volatile var fcEm = 0L; private set       // quando chegou
+    private val amostras = ArrayList<LongArray>()   // [segundos, bpm], 1 a cada 5 s, ainda não entregues à ponte
+    private var ultAmostra = 0L
+    private val envioFc = Executors.newSingleThreadExecutor()
+
+    @Synchronized fun novaFc(bpm: Int) {
+        val agora = System.currentTimeMillis()
+        fc = bpm; fcEm = agora
+        if (agora - ultAmostra >= 5000) {
+            ultAmostra = agora
+            amostras.add(longArrayOf(agora / 1000, bpm.toLong()))
+            if (amostras.size > 720) amostras.removeAt(0) // sem rede por 1 h: fica só a última hora
+        }
+    }
+
+    /** Manda as leituras guardadas para a ponte (o app do celular cruza com os tempos das séries ao gravar). */
+    fun enviarFc() = envioFc.execute {
+        if (chave.isEmpty()) return@execute
+        val lote = synchronized(this) { amostras.take(60) }
+        if (lote.isEmpty()) return@execute
+        try {
+            pedir(mapOf("api" to "fc", "k" to chave, "a" to lote.joinToString(",") { "${it[0]}:${it[1]}" }))
+            synchronized(this) { amostras.removeAll(lote.toSet()) }
+        } catch (e: Exception) {}
+    }
+
     // ---------- estado ----------
 
     /** O que mostrar: o toque feito aqui vale até o celular ler os toques. */

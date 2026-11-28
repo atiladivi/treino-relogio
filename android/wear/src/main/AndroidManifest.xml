@@ -10,6 +10,13 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- batimentos (Health Services): sensor do corpo, também com a tela apagada (serviço do tipo "saúde") -->
+    <uses-permission android:name="android.permission.BODY_SENSORS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+
+    <queries>
+        <package android:name="com.google.android.wearable.healthservices" />
+    </queries>
 
     <application
         android:label="Treino"
@@ -35,7 +42,7 @@
         <service
             android:name=".RelogioService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|health">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Cronômetro do treino e aviso do fim do descanso com a tela apagada" />

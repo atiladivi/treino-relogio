@@ -66,8 +66,10 @@ class MainActivity : ComponentActivity() {
         tela = Tela(this) { if (Sincronia.tocar()) { tela.performHapticFeedback(HapticFeedbackConstants.CONFIRM); tela.invalidate() } }
         setContentView(tela)
         lifecycle.addObserver(AmbientLifecycleObserver(this, ambiente))
-        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        // notificação (ícone no mostrador) e sensores do corpo (batimentos): pedidas uma vez, na tela do relógio
+        val faltam = arrayOf(Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.BODY_SENSORS)
+            .filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (faltam.isNotEmpty()) requestPermissions(faltam.toTypedArray(), 1)
     }
 
     override fun onNewIntent(i: Intent) {
@@ -217,6 +219,16 @@ class Tela(ctx: Context, private val aoTocar: () -> Unit) : View(ctx) {
         txt.style = Paint.Style.FILL; txt.fontFeatureSettings = null
         if (v.sub.isNotEmpty())
             texto(c, v.sub, cx, Y(yT + 42f), 22f * k, if (v.aviso && !amb) AMARELO else TINTA2, 330f * k, MEDIO)
+
+        // batimentos (leitura dos últimos 15 s), entre o tempo e a meia-lua
+        if (v.fase != 0 && Sincronia.fc > 0 && System.currentTimeMillis() - Sincronia.fcEm < 15000) {
+            val num = Sincronia.fc.toString()
+            txt.textSize = 26f * k; txt.typeface = NEGRITO; txt.letterSpacing = 0f
+            val lc = txt.measureText("♥"); val ln = txt.measureText(num); val esp = 6f * k
+            val x0 = cx - (lc + esp + ln) / 2; val yF = Y(if (nl > 1) 352f else 346f)
+            txt.color = if (amb) CINZA else cor("#ff6b6b"); c.drawText("♥", x0 + lc / 2, yF, txt)
+            txt.color = if (amb) CINZA else TINTA; c.drawText(num, x0 + lc + esp + ln / 2, yF, txt)
+        }
 
         // meia-lua
         topoBotao = Y(topo)

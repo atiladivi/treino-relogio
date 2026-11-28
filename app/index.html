@@ -1340,7 +1340,8 @@ function calcTempos(f) {
       execSeg: Math.round(ex / 1000), descSeg: Math.round(de / 1000), tempos: ser.map(x => s0(x.ini) + '-' + s0(x.fim)).join(' ') };
   });
   const min = ms => Math.round(ms / 6000) / 10;
-  return { sessao: { inicio: horaDe(f.inicio), fim: horaDe(fim), duracao: min(dur), execucao: min(execT), descanso: min(descT),
+  // inicioMs: o servidor cruza com as leituras de batimento do relógio (média/pico por série e do treino)
+  return { sessao: { inicioMs: f.inicio, inicio: horaDe(f.inicio), fim: horaDe(fim), duracao: min(dur), execucao: min(execT), descanso: min(descT),
     troca: min(Math.max(0, dur - execT - descT)), pausa: min(pausa) }, itens };
 }
 /** Descansos entre séries (s), a partir de '0-45 95-140'. */
@@ -2103,12 +2104,18 @@ function telaHistorico() {
     ${lista.length ? lista.map(cardSessao).join('') : `<div class="card empty">Nenhum treino em ${MESES[m - 1]}.</div>`}`;
 }
 /** ⏱ 6:10 · 4 séries · descanso médio 1:05 (ficha 0:40) */
+/** Batimentos por série gravados ('128/141 132/150', '-' = sem leitura) → linha "♥ 1ª 128/141 · 2ª 132/150". */
+function linhaFcEx(r) {
+  const p = String(r.fcSeries || '').trim().split(/\s+/).filter(Boolean);
+  if (!p.some(x => x !== '-')) return '';
+  return `<div class="small muted">♥ média/pico: ${p.map((x, k) => `${k + 1}ª ${x === '-' ? '—' : esc(x)}`).join(' · ')}</div>`;
+}
 function linhaTempoEx(r, s) {
-  if (!r.tempoEx) return '';
+  if (!r.tempoEx) return linhaFcEx(r);
   const d = descansosDe(r.tempos), medio = d.length ? d.reduce((a, b) => a + b, 0) / d.length : null;
   const fichaD = num(X.descFicha.get(`${s.ficha}|${s.dia}|${r.exercicio}`));
   const acima = medio != null && fichaD && medio > fichaD * 1.25;
-  return `<div class="small muted">⏱ ${fmtT(r.tempoEx * 1000)} · ${plural(r.nSeries, 'série')}${medio != null ? ` · descanso médio <span class="${acima ? 'tm-over' : ''}">${fmtT(medio * 1000)}</span>${fichaD ? ` (ficha ${fmtT(fichaD * 1000)})` : ''}` : ''}</div>`;
+  return `<div class="small muted">⏱ ${fmtT(r.tempoEx * 1000)} · ${plural(r.nSeries, 'série')}${medio != null ? ` · descanso médio <span class="${acima ? 'tm-over' : ''}">${fmtT(medio * 1000)}</span>${fichaD ? ` (ficha ${fmtT(fichaD * 1000)})` : ''}` : ''}</div>${linhaFcEx(r)}`;
 }
 function cardSessao(s) {
   const regs = X.regsPorSessao.get(String(s.id)) || [];
@@ -2120,13 +2127,13 @@ function cardSessao(s) {
       <span class="dt">${fmtDataLonga(s.data)}</span>
       <div style="flex:1">
         <div><b>${esc(s.dia)}</b> — ${esc(s.foco)}</div>
-        <div class="small muted row" style="gap:6px">${gDots(feitos.map(r => r.grupo))}<span>${esc(s.ficha)} · ${feitos.length}/${regs.length} exercícios${s.duracao ? ' · ⏱ ' + fmtMin(s.duracao) : ''}</span></div>
+        <div class="small muted row" style="gap:6px">${gDots(feitos.map(r => r.grupo))}<span>${esc(s.ficha)} · ${feitos.length}/${regs.length} exercícios${s.duracao ? ' · ⏱ ' + fmtMin(s.duracao) : ''}${s.fcMed ? ' · ♥ ' + s.fcMed : ''}</span></div>
       </div>
       ${prs ? `<span class="badge gold">🏆 ${prs}</span>` : ''}
       <span class="muted">${aberta ? '▾' : '▸'}</span>
     </div>
     ${aberta ? `
-      ${s.duracao ? `<div style="margin-top:10px"><div class="small"><b>⏱ ${fmtMin(s.duracao)}</b>${s.inicio ? ` · ${esc(s.inicio)}–${esc(s.fim)}` : ''}</div>${barraTempos(s)}</div>` : ''}
+      ${s.duracao ? `<div style="margin-top:10px"><div class="small"><b>⏱ ${fmtMin(s.duracao)}</b>${s.inicio ? ` · ${esc(s.inicio)}–${esc(s.fim)}` : ''}${s.fcMed ? ` · ♥ média ${s.fcMed} · pico ${s.fcMax}` : ''}</div>${barraTempos(s)}</div>` : ''}
       <table class="t" style="margin-top:10px">
         <tr><th>Exercício</th><th class="num">Carga</th><th class="num">vs. anterior</th></tr>
         ${regs.map(r => {
@@ -2157,13 +2164,14 @@ async function editarSessao(id) {
   S.form = {
     id: String(s.id), data: s.data, ficha: s.ficha, dia: s.dia, foco: s.foco, obs: s.obs || '',
     // editar não mexe nos tempos gravados
-    tempoFixo: { inicio: s.inicio, fim: s.fim, duracao: s.duracao, execucao: s.execucao, descanso: s.descanso, troca: s.troca, pausa: s.pausa },
+    tempoFixo: { inicio: s.inicio, fim: s.fim, duracao: s.duracao, execucao: s.execucao, descanso: s.descanso, troca: s.troca, pausa: s.pausa,
+      fcMed: s.fcMed, fcMax: s.fcMax },
     itens: (X.regsPorSessao.get(String(id)) || []).map(r => {
       const it = novoItem(ref.get(r.exercicio) || { exercicio: r.exercicio }, !ref.has(r.exercicio));
       it.grupo = r.grupo || it.grupo; it.carga = r.carga == null ? it.carga : r.carga; it.feito = r.feito; it.obs = r.obs || ''; it.ajuste = r.ajuste ? String(r.ajuste) : it.ajuste;
       it.drops = r.dropsArr.slice(); it.inclinacao = r.inclinacao ? String(r.inclinacao) : '';
       it.plan = (r.kr || []).map(x => ({ kg: x.kg == null ? '' : x.kg, reps: x.reps == null ? '' : x.reps }));
-      it.tempoFixo = { nSeries: r.nSeries, tempoEx: r.tempoEx, execSeg: r.execSeg, descSeg: r.descSeg, tempos: r.tempos };
+      it.tempoFixo = { nSeries: r.nSeries, tempoEx: r.tempoEx, execSeg: r.execSeg, descSeg: r.descSeg, tempos: r.tempos, fc: r.fcSeries || '' };
       return it;
     }),
   };
