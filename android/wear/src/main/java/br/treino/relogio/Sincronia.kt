@@ -240,7 +240,8 @@ object Sincronia {
         var ponto = 0            // 0 cinza, 1 ok, 2 erro, 3 celular parado
     }
 
-    private fun fmt(ms: Long): String { val s = maxOf(0L, ms / 1000); return "${s / 60}:" + (s % 60).toString().padStart(2, '0') }
+    // arredonda como o app do celular (fmtT), para os dois mostrarem o mesmo segundo
+    private fun fmt(ms: Long): String { val s = maxOf(0L, Math.round(ms / 1000.0)); return "${s / 60}:" + (s % 60).toString().padStart(2, '0') }
 
     fun visual(): Visual {
         val v = Visual()
@@ -281,7 +282,7 @@ object Sincronia {
                             v.fase = 3; v.rot = "PASSOU DO DESCANSO"; v.t = "+" + fmt(dt - alvo); v.arco = 1f
                             v.sub = "ficha " + fmt(alvo)
                         } else if (alvo > 0) {
-                            v.fase = 2; v.t = fmt(alvo - dt + 999); v.arco = 1f - dt.toFloat() / alvo
+                            v.fase = 2; v.t = fmt(alvo - dt); v.arco = 1f - dt.toFloat() / alvo
                             v.sub = "de " + fmt(alvo)
                         } else {
                             v.fase = 2; v.t = fmt(dt); v.arco = 1f

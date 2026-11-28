@@ -115,9 +115,10 @@ class Tela(ctx: Context, private val aoTocar: () -> Unit) : View(ctx) {
     private val CINZA = cor("#8a93a3"); private val CINZA_ESC = cor("#3a414d")
 
     // por fase: 0 nada, 1 série, 2 descanso, 3 estourado, 4 primeiro/próximo
-    private val FUNDO = intArrayOf(Color.BLACK, cor("#071733"), cor("#06200f"), cor("#2a0b09"), cor("#06200f"))
-    private val ROTULO = intArrayOf(cor("#8db8ff"), cor("#8db8ff"), cor("#6fe0a5"), cor("#ff9a90"), cor("#6fe0a5"))
-    private val ARCO = intArrayOf(0, AZUL, VERDE, VERMELHO, VERDE)
+    // mesmas cores do app do celular (tema escuro): série = verde, descanso = dourado, passou = vermelho, pronto = azul
+    private val FUNDO = intArrayOf(Color.BLACK, cor("#0f2a1d"), cor("#2d2512"), cor("#2a0b09"), cor("#101a2e"))
+    private val ROTULO = intArrayOf(cor("#8db8ff"), cor("#7fdcae"), cor("#f7d77f"), cor("#ff9a90"), cor("#8db8ff"))
+    private val ARCO = intArrayOf(0, cor("#4cc38a"), cor("#f2c14e"), cor("#f97066"), cor("#6ea2f5"))
 
     private val txt = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
     private val nomeP = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) }
@@ -240,12 +241,12 @@ class Tela(ctx: Context, private val aoTocar: () -> Unit) : View(ctx) {
                 c.drawLine(ox, Y(topo), ox + s, Y(topo), p)
             } else {
                 p.style = Paint.Style.FILL
-                p.color = if (v.botaoVerde) VERDE else AZUL
+                p.color = ARCO[maxOf(1, v.fase)]
                 if (apertado) p.color = misturar(p.color, Color.BLACK, .25f)
                 c.drawRect(ox, Y(topo), ox + s, oy + s, p)
             }
             c.restore()
-            val corTxt = if (amb) CINZA else if (v.botaoVerde) cor("#04150c") else Color.WHITE
+            val corTxt = if (amb) CINZA else cor("#0b1220")
             texto(c, v.botao, cx, Y(topo + ALTURA_BOTAO * .5f), 32f * k, corTxt, 260f * k, NEGRITO)
         }
     }

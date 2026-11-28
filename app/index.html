@@ -958,7 +958,7 @@ function textoEstado(f) {
   if (e.tipo === 'exec') { const it = f.itens[e.i]; return `${esc(it.exercicio)} · série ${it.serT.length} <b>${fmtT(t)}</b>`; }
   if (e.tipo === 'desc') {
     const it = f.itens[e.i], cls = e.alvo ? (t / 1000 > e.alvo ? 'tm-over' : 'tm-ok') : '';
-    return `${esc(it.exercicio)} · descanso <b class="${cls}">${fmtT(t)}</b>${e.alvo ? ' / ' + fmtT(e.alvo * 1000) : ''}`;
+    return `${esc(it.exercicio)} · descanso <b class="${cls}">${tempoDesc(t, e.alvo)}</b>${e.alvo ? ' · meta ' + fmtT(e.alvo * 1000) : ''}`;
   }
   return f.itens.some(it => (it.serT || []).length || it.feito) ? `Troca de exercício <b>${fmtT(t)}</b>` : 'Toque em ▶ no primeiro exercício';
 }
@@ -1103,7 +1103,7 @@ function dockTreino() {
     rot = `Descanso · <span class="${bump}">${n}ª${de} feita</span>`;
     tempo = `<div class="anel ${over ? 'over' : ''}" id="anel-${i}"><svg viewBox="0 0 58 58"><circle class="fundo" cx="29" cy="29" r="25"/>
         <circle class="arco" cx="29" cy="29" r="25" stroke-dasharray="${ANEL_C}" style="stroke-dashoffset:${e.alvo ? arcoOffset(t, e.alvo) : 0}"/></svg>
-        <b id="st-${i}">${fmtT(t)}</b></div>${e.alvo ? `<span class="small muted">ficha<br>${fmtT(e.alvo * 1000)}</span>` : ''}`;
+        <b id="st-${i}">${tempoDesc(t, e.alvo)}</b></div>${e.alvo ? `<span class="small muted">ficha<br>${fmtT(e.alvo * 1000)}</span>` : ''}`;
   } else if (n) {
     rot = `<span class="${bump}">${n}${de} séries feitas</span>`; tempo = '';
   } else {
@@ -1174,17 +1174,20 @@ function atualizarCrono(tudo) {
   const st = document.getElementById('crono-st'); if (st) st.innerHTML = textoEstado(f);
   if (e.i != null) {
     const t = agora() - e.desde;
-    const el = document.getElementById('st-' + e.i); if (el) el.textContent = fmtT(t);
-    const lt = document.getElementById('lt-' + e.i); if (lt) lt.textContent = fmtT(t);
+    const txt = e.tipo === 'desc' ? tempoDesc(t, e.alvo) : fmtT(t);
+    const el = document.getElementById('st-' + e.i); if (el) el.textContent = txt;
+    const lt = document.getElementById('lt-' + e.i); if (lt) lt.textContent = txt;
     const an = document.getElementById('anel-' + e.i);
     if (an && e.tipo === 'desc') { an.querySelector('.arco').style.strokeDashoffset = arcoOffset(t, e.alvo); an.classList.toggle('over', !!e.alvo && t > e.alvo * 1000); }
     const ba = document.getElementById('banda-' + e.i);
     if (ba && e.tipo === 'desc') {
       ba.classList.toggle('over', !!e.alvo && t > e.alvo * 1000);
-      const br = document.getElementById('barra-' + e.i); if (br && e.alvo) br.style.width = Math.min(100, t / (e.alvo * 10)) + '%';
+      const br = document.getElementById('barra-' + e.i); if (br && e.alvo) br.style.width = (t > e.alvo * 1000 ? 100 : 100 - t / (e.alvo * 10)) + '%';
     }
   }
 }
+/** Descanso em contagem regressiva (igual ao relógio): quanto falta para a meta; passou → "+0:12". Sem meta, o tempo corrido. */
+const tempoDesc = (t, alvo) => !alvo ? fmtT(t) : t <= alvo * 1000 ? fmtT(Math.max(0, alvo * 1000 - t)) : '+' + fmtT(t - alvo * 1000);
 const ANEL_C = 2 * Math.PI * 25;
 const arcoOffset = (t, alvo) => alvo ? ANEL_C * (1 - Math.min(1, t / (alvo * 1000))) : 0;
 setInterval(() => atualizarCrono(false), 1000);
@@ -1575,10 +1578,10 @@ function telaFoco() {
     banda = `<div class="banda exec"><div><small>${n}ª série${total ? ` de ${total}` : ''} · execução</small><b id="st-${i}">${fmtT(agora() - ultSerie(it).ini)}</b></div></div>`;
   } else if (desc) {
     const t = agora() - ultSerie(it).fim, over = e.alvo && t > e.alvo * 1000;
-    banda = `<div class="banda desc ${over ? 'over' : ''}" id="banda-${i}"><div><small>Descanso${e.alvo ? ` · meta ${fmtT(e.alvo * 1000)}` : ''}</small><b id="st-${i}">${fmtT(t)}</b></div>
+    banda = `<div class="banda desc ${over ? 'over' : ''}" id="banda-${i}"><div><small>${over ? 'Passou do descanso' : 'Descanso'}${e.alvo ? ` · meta ${fmtT(e.alvo * 1000)}` : ''}</small><b id="st-${i}">${tempoDesc(t, e.alvo)}</b></div>
       <button class="bt" onclick="ajustarDescanso(${i}, -15)" aria-label="Diminuir o descanso 15 segundos">−15 s</button>
       <button class="bt" onclick="ajustarDescanso(${i}, 15)" aria-label="Aumentar o descanso 15 segundos">+15 s</button>
-      ${e.alvo ? `<i class="barra" id="barra-${i}" style="width:${Math.min(100, t / (e.alvo * 10))}%"></i>` : ''}</div>`;
+      ${e.alvo ? `<i class="barra" id="barra-${i}" style="width:${over ? 100 : 100 - t / (e.alvo * 10)}%"></i>` : ''}</div>`;
   } else {
     banda = `<div class="banda"><div><small>${emPrevia() ? 'Prévia · toque ▶ para iniciar' : n ? `${n} de ${total || n} feita${n > 1 ? 's' : ''}` : 'Pronto'}</small><b>${n + 1}ª série</b></div></div>`;
   }
@@ -1791,7 +1794,7 @@ function linhaItem(i) {
   const n = (it.serT || []).length, de = it.seriesTotal ? ` de ${it.seriesTotal}` : '';
   if (!f.id && f.atual === i && n) {
     if (emExecucao(it)) return `<span class="vivo">Série ${n}${de} em andamento · <b id="lt-${i}">${fmtT(agora() - ultSerie(it).ini)}</b></span>`;
-    return `<span class="vivo">${n}ª${de} feita · descanso <b id="lt-${i}">${fmtT(agora() - ultSerie(it).fim)}</b></span>`;
+    return `<span class="vivo">${n}ª${de} feita · descanso <b id="lt-${i}">${tempoDesc(agora() - ultSerie(it).fim, num(it.descanso) || 0)}</b></span>`;
   }
   const ult = ultimoReg(it.exercicio, sid);
   return [n ? `${n}${de} séries` : '', ult ? `Últ. ${fmtCargas(ult.carga, ult.dropsArr)}` : 'Primeira vez',
