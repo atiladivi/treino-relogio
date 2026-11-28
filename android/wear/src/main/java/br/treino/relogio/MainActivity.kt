@@ -93,6 +93,12 @@ class MainActivity : ComponentActivity() {
         h.removeCallbacks(tique)
         super.onStop()
     }
+
+    /** Fechou o app (botão voltar) sem treino aberto: o serviço para na hora (com treino, segue para vibrar). */
+    override fun onDestroy() {
+        if (isFinishing && !Sincronia.emTreino(Sincronia.atual())) stopService(Intent(this, RelogioService::class.java))
+        super.onDestroy()
+    }
 }
 
 /** Desenha tudo em unidades de um relógio de 480 px (o mockup) e escala para a tela real. */
