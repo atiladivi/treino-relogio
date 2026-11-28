@@ -4,3 +4,4 @@ android/app/build/
 *.p12
 *.jks
 local.properties
+android/wear/build/

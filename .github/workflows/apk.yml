@@ -1,5 +1,6 @@
 # Compila o app Android (pasta android/) e publica o APK em
 # https://github.com/atiladivi/treino-relogio/releases/download/apk/treino.apk
+# e o app do relógio (pasta android/wear) em .../releases/download/apk/relogio.apk
 # A chave de assinatura vem dos secrets KS_B64 e KS_PASS (nunca do código).
 name: APK
 
@@ -54,5 +55,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp android/app/build/outputs/apk/release/app-release.apk treino.apk
+          cp android/wear/build/outputs/apk/release/wear-release.apk relogio.apk
           gh release delete apk --yes --cleanup-tag || true
-          gh release create apk treino.apk --title "Treino (versão ${{ github.run_number }})"             --notes "APK do app Treino. Baixe no celular e instale por cima da versão anterior."
+          gh release create apk treino.apk relogio.apk --title "Treino (versão ${{ github.run_number }})"             --notes "treino.apk = celular (baixe e instale por cima). relogio.apk = Galaxy Watch (instalar pelo PC com adb)."

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Tema" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">#000000</item>
+        <!-- deslizar para o lado não fecha o app no meio do treino (sair = botão voltar do relógio) -->
+        <item name="android:windowSwipeToDismiss">false</item>
+    </style>
+</resources>
